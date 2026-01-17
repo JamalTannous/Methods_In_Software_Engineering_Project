@@ -49,3 +49,82 @@ def test_engine_deterministic_order_registration():
         "RULE_ENCRYPTION_MISSING",
     ]
 
+def test_evaluate_all_with_empty_resource_list():
+    engine = RuleEngine()
+    results = engine.evaluateAll([])
+    assert results == []
+def test_evaluate_with_no_registered_rules():
+    engine = RuleEngine()
+
+    resource = ResourceConfig(
+        resource_id="acc1:bucket-empty-rules",
+        provider="AWS",
+        resource_type="bucket",
+        public_access=True,
+        encryption_enabled=True,
+        logging_enabled=True,
+        policy_summary={},
+        metadata={}
+    )
+
+    results = engine.evaluateResource(resource)
+    assert results == []
+
+class FailingRule:
+    def getRuleId(self):
+        return "RULE_FAILING"
+
+    def getDescription(self):
+        return "This rule always fails"
+
+    def getDefaultSeverity(self):
+        return Severity.LOW
+
+    def evaluate(self, resource):
+        raise RuntimeError("Intentional failure")
+
+
+def test_rule_failure_does_not_interrupt_engine():
+    engine = RuleEngine()
+
+    engine.registerRule(FailingRule())
+    engine.registerRule(PublicAccessRule())
+
+    resource = ResourceConfig(
+        resource_id="acc1:bucket-fault-isolation",
+        provider="AWS",
+        resource_type="bucket",
+        public_access=True,
+        encryption_enabled=True,
+        logging_enabled=True,
+        policy_summary={},
+        metadata={}
+    )
+
+    results = engine.evaluateResource(resource)
+
+    assert len(results) == 1
+    assert results[0].rule_id == "RULE_PUBLIC_ACCESS"
+
+def test_deterministic_results_order():
+    engine = RuleEngine()
+    engine.registerRule(PublicAccessRule())
+    engine.registerRule(EncryptionRule())
+    engine.registerRule(LoggingRule())
+
+    resource = ResourceConfig(
+        resource_id="acc1:bucket-deterministic",
+        provider="AWS",
+        resource_type="bucket",
+        public_access=True,
+        encryption_enabled=False,
+        logging_enabled=False,
+        policy_summary={},
+        metadata={}
+    )
+
+    first_run = engine.evaluateResource(resource)
+    second_run = engine.evaluateResource(resource)
+
+    assert first_run == second_run
+
